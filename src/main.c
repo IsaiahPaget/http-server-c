@@ -7,6 +7,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+struct msgstruct {
+        uint32_t length;
+        char send_data[4096];
+};
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -53,7 +58,15 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 
-	accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+
+	struct msgstruct response;
+	strncpy(response.send_data, "HTTP/1.1 200 OK\r\n\r\n", sizeof(response.send_data));
+	int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+	int error = send(client_fd, response.send_data, strlen(response.send_data), 0);
+	if (error == -1) {
+		printf("\nSocket error.");
+		exit(1);
+	}
 	printf("Client connected\n");
 
 	close(server_fd);
