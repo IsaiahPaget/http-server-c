@@ -1,35 +1,79 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define REQUEST_RESPONSE_ARENA_SIZE 16384
 #define BUFFER_SIZE 4096
 #define METHOD_BUFFER_SIZE 8
 #define PATH_BUFFER_SIZE 1024
 #define VERSION_BUFFER_SIZE 16
 
+typedef struct String {
+	char* characters;
+	int32_t length;
+} String;
+
+char String_GetChar(String string, int32_t index) {
+	if (index < 0 || index >= string.length) {
+		raise(SIGTRAP);
+	}
+	return string.characters[index];
+}
+
+typedef struct Arena {
+	char* memory;
+	int32_t capacity;
+	int32_t offset;
+} Arena;
+
+
+void* Arena_Alloc(Arena* arena, int32_t size) {
+    if (arena->offset + size > arena->capacity) {
+        fprintf(stderr, "Arena overflow\n");
+        exit(1);
+    }
+    void* ptr = arena->memory + arena->offset;
+    arena->offset += size;
+    return ptr;
+}
+
+void Arena_Destroy(Arena* arena) {
+    free(arena->memory);
+    arena->memory = NULL;
+    arena->capacity = 0;
+    arena->offset = 0;
+}
+
 typedef struct Response {
-        uint32_t length;
-        char send_data[BUFFER_SIZE];
+        String send_data;
 } Response;
 
 typedef struct Request {
-        uint32_t length;
-        char receive_data[BUFFER_SIZE];
-		char method[METHOD_BUFFER_SIZE];
-		char path[PATH_BUFFER_SIZE];
-		char version[VERSION_BUFFER_SIZE];
+		int32_t length;
+        String receive_data;
+		String method;
+		String path;
+		String version;
 } Request;
 
 void parse_request(Request *request) {
-	printf("%s\n", request->receive_data);
+	printf("%s\n", request->receive_data.characters);
 	printf("%d\n", request->length);
 
-	sscanf(request->receive_data, "%s %s %s\r\n", request->method, request->path, request->version);
+	sscanf(
+		request->receive_data.characters,
+		"%s %s %s\r\n",
+		request->method.characters,
+		request->path.characters,
+		request->version.characters
+	);
 }
 
 int main() {
@@ -40,6 +84,33 @@ int main() {
 	// You can use print statements as follows for debugging, they'll be visible
 	// when running tests.
 	printf("Logs from your program will appear here!\n");
+
+
+	Arena request_response_data = (Arena) {
+		.memory = malloc(REQUEST_RESPONSE_ARENA_SIZE),
+		.capacity = REQUEST_RESPONSE_ARENA_SIZE,
+	};
+
+	Request request = (Request){
+		.receive_data = (String){
+			.characters = Arena_Alloc(&request_response_data, BUFFER_SIZE),
+		},
+		.method = (String){
+			.characters = Arena_Alloc(&request_response_data, METHOD_BUFFER_SIZE),
+		},
+		.path = (String){
+			.characters = Arena_Alloc(&request_response_data, PATH_BUFFER_SIZE),
+		},
+		.version = (String){
+			.characters = Arena_Alloc(&request_response_data, VERSION_BUFFER_SIZE),
+		},
+	};
+
+	Response response = (Response){
+		.send_data = (String){
+			.characters = Arena_Alloc(&request_response_data, BUFFER_SIZE),
+		},
+	};
 
 	int server_fd;
 	struct sockaddr_in client_addr;
@@ -81,25 +152,23 @@ int main() {
 
 	int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
 
-	Request request;
-	int request_length = read(client_fd, request.receive_data, 128);
+	int request_length = read(client_fd, request.receive_data.characters, 128);
 	if (request_length < 0) {
-		printf("\nSocket read error.");
+		printf("\nSocket read error (%d): %s\n", errno, strerror(errno));
 		exit(1);
 	}
 	request.length = request_length;
 
 	parse_request(&request);
 
-	Response response;
 
-	if (strcmp(request.path, "/") == 0) {
-		strncpy(response.send_data, "HTTP/1.1 200 OK\r\n\r\n", sizeof(response.send_data));
+	if (strcmp(request.path.characters, "/") == 0) {
+		strncpy(response.send_data.characters, "HTTP/1.1 200 OK\r\n\r\n", (sizeof(char) * response.send_data.length));
 	} else {
-		strncpy(response.send_data, "HTTP/1.1 404 Not Found\r\n\r\n", sizeof(response.send_data));
+		strncpy(response.send_data.characters, "HTTP/1.1 404 Not Found\r\n\r\n", (sizeof(char) * response.send_data.length));
 	}
 
-	int error = send(client_fd, response.send_data, strlen(response.send_data), 0);
+	int error = send(client_fd, response.send_data.characters, strlen(response.send_data.characters), 0);
 	if (error < 0) {
 		printf("\nSocket error.");
 		exit(1);
