@@ -1,7 +1,9 @@
 #include <errno.h>
+#include <iso646.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,21 +13,9 @@
 
 #define REQUEST_RESPONSE_ARENA_SIZE 16384
 #define BUFFER_SIZE 4096
-#define METHOD_BUFFER_SIZE 8
-#define PATH_BUFFER_SIZE 1024
-#define VERSION_BUFFER_SIZE 16
-
-typedef struct String {
-	char* characters;
-	int32_t length;
-} String;
-
-char String_GetChar(String string, int32_t index) {
-	if (index < 0 || index >= string.length) {
-		raise(SIGTRAP);
-	}
-	return string.characters[index];
-}
+#define START_LINE_BUFFER_SIZE 1024
+#define HEADERS_BUFFER_SIZE 1024
+#define BODY_BUFFER_SIZE 1024
 
 typedef struct Arena {
 	char* memory;
@@ -33,83 +23,138 @@ typedef struct Arena {
 	int32_t offset;
 } Arena;
 
-
-void* Arena_Alloc(Arena* arena, int32_t size) {
-    if (arena->offset + size > arena->capacity) {
-        fprintf(stderr, "Arena overflow\n");
-        exit(1);
-    }
-    void* ptr = arena->memory + arena->offset;
-    arena->offset += size;
-    return ptr;
+void* Arena_Alloc(Arena* arena, int32_t size)
+{
+	if (!arena->memory) {
+		fprintf(stderr, "Failed to allocate arena memory\n");
+		exit(1);
+	}
+	if (arena->offset + size > arena->capacity) {
+		fprintf(stderr, "Arena overflow\n");
+		exit(1);
+	}
+	void* ptr = arena->memory + arena->offset;
+	arena->offset += size;
+	return ptr;
 }
 
-void Arena_Destroy(Arena* arena) {
-    free(arena->memory);
-    arena->memory = NULL;
-    arena->capacity = 0;
-    arena->offset = 0;
+void Arena_Destroy(Arena* arena)
+{
+	free(arena->memory);
+	arena->memory = NULL;
+	arena->capacity = 0;
+	arena->offset = 0;
+}
+typedef struct String {
+	char* value;
+	int32_t length;
+} String;
+
+char String_GetChar(String string, int32_t index)
+{
+	if (index < 0 || index >= string.length) {
+		raise(SIGTRAP);
+	}
+	return string.value[index];
+}
+
+void String_Slice(String* destination, String src, int32_t starting_index,
+	int32_t ending_index)
+{
+	if (starting_index < 0) {
+		raise(SIGTRAP);
+	}
+	if (ending_index < 0 || ending_index <= starting_index) {
+		raise(SIGTRAP);
+	}
+	destination->length = ending_index - starting_index;
+	strncpy(destination->value, &src.value[starting_index],
+		destination->length);
+}
+
+int32_t String_IndexOf(String string, const char* substring,
+	int32_t starting_index)
+{
+	size_t substring_length = strlen(substring);
+	if (substring_length == 0 || substring_length > string.length)
+		raise(SIGTRAP);
+
+	for (int i = starting_index; i <= string.length - substring_length; i++) {
+		if (strncmp(&string.value[i], substring, substring_length) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+void String_Create(String* string, const char* const_string)
+{
+	if (string->length > 0) {
+		raise(SIGTRAP);
+	}
+	size_t length = strlen(const_string);
+	if (length <= 0) {
+		raise(SIGTRAP);
+	}
+	strncpy(string->value, const_string, length);
+	string->length = length;
+}
+
+void String_NCopy(String* destination, String src, size_t index)
+{
+	strncpy(destination->value, src.value, index);
+	destination->length = src.length;
 }
 
 typedef struct Response {
-        String send_data;
+	String send_data;
 } Response;
 
 typedef struct Request {
-		int32_t length;
-        String receive_data;
-		String method;
-		String path;
-		String version;
+	String request_data;
+	String start_line;
+	String headers;
+	String body;
 } Request;
 
-void parse_request(Request *request) {
-	printf("%s\n", request->receive_data.characters);
-	printf("%d\n", request->length);
+void parse_request(Arena* request_response_data, Request* request)
+{
+	printf("%s\n", request->request_data.value);
 
-	sscanf(
-		request->receive_data.characters,
-		"%s %s %s\r\n",
-		request->method.characters,
-		request->path.characters,
-		request->version.characters
-	);
+	// get the string from the start of the line to the first occurence of \r\n
+	int32_t index_of_rn = String_IndexOf(request->request_data, "\r\n", 0);
+	request->start_line.value = Arena_Alloc(request_response_data, START_LINE_BUFFER_SIZE);
+	String_Slice(&request->start_line, request->request_data, 0, index_of_rn);
+	// get the string from after the firs;t occurence of \r\n until the first
+	// occurence of \r\n\r\n
+	int32_t index_of_rn_two = String_IndexOf(request->request_data, "\r\n\r\n", index_of_rn + 2);
+	if (index_of_rn_two == -1) {
+		printf("index not found: %i\n", index_of_rn_two);
+		raise(SIGTRAP);
+	}
+	request->headers.value = Arena_Alloc(request_response_data, START_LINE_BUFFER_SIZE);
+	String_Slice(&request->headers, request->request_data, index_of_rn + 2,
+		index_of_rn_two);
+	printf("start_line: %s\n", request->start_line.value);
+	printf("headers: %s\n", request->headers.value);
+	//
+	// get the string from after the first occurence of \r\n\r\n until the end
+	// of the string
 }
 
-int main() {
-	// Disable output buffering
+int main()
+{
+	/* // Disable output buffering */
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
-
+	/**/
 	// You can use print statements as follows for debugging, they'll be visible
 	// when running tests.
 	printf("Logs from your program will appear here!\n");
 
-
 	Arena request_response_data = (Arena) {
-		.memory = malloc(REQUEST_RESPONSE_ARENA_SIZE),
+		.memory = calloc(1, REQUEST_RESPONSE_ARENA_SIZE),
 		.capacity = REQUEST_RESPONSE_ARENA_SIZE,
-	};
-
-	Request request = (Request){
-		.receive_data = (String){
-			.characters = Arena_Alloc(&request_response_data, BUFFER_SIZE),
-		},
-		.method = (String){
-			.characters = Arena_Alloc(&request_response_data, METHOD_BUFFER_SIZE),
-		},
-		.path = (String){
-			.characters = Arena_Alloc(&request_response_data, PATH_BUFFER_SIZE),
-		},
-		.version = (String){
-			.characters = Arena_Alloc(&request_response_data, VERSION_BUFFER_SIZE),
-		},
-	};
-
-	Response response = (Response){
-		.send_data = (String){
-			.characters = Arena_Alloc(&request_response_data, BUFFER_SIZE),
-		},
 	};
 
 	int server_fd;
@@ -132,10 +177,10 @@ int main() {
 	struct sockaddr_in serv_addr = {
 		.sin_family = AF_INET,
 		.sin_port = htons(4221),
-		.sin_addr = {htonl(INADDR_ANY)},
+		.sin_addr = { htonl(INADDR_ANY) },
 	};
 
-	if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
+	if (bind(server_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
 		printf("Bind failed: %s \n", strerror(errno));
 		return 1;
 	}
@@ -149,26 +194,33 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	socklen_t client_addr_len = sizeof(client_addr);
 
+	int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
 
-	int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+	Request request = { 0 };
+	request.request_data.value = Arena_Alloc(&request_response_data, BUFFER_SIZE);
 
-	int request_length = read(client_fd, request.receive_data.characters, 128);
+	int request_length = read(client_fd, request.request_data.value, BUFFER_SIZE);
 	if (request_length < 0) {
 		printf("\nSocket read error (%d): %s\n", errno, strerror(errno));
 		exit(1);
 	}
-	request.length = request_length;
+	request.request_data.length = request_length;
 
-	parse_request(&request);
+	parse_request(&request_response_data, &request);
 
+	Response response = { 0 };
+	response.send_data.value = Arena_Alloc(&request_response_data, BUFFER_SIZE);
 
-	if (strcmp(request.path.characters, "/") == 0) {
-		strncpy(response.send_data.characters, "HTTP/1.1 200 OK\r\n\r\n", (sizeof(char) * response.send_data.length));
+	if (strcmp(request.headers.value, "/") == 0) {
+		strncpy(response.send_data.value, "HTTP/1.1 200 OK\r\n\r\n",
+			(sizeof(char) * response.send_data.length));
 	} else {
-		strncpy(response.send_data.characters, "HTTP/1.1 404 Not Found\r\n\r\n", (sizeof(char) * response.send_data.length));
+		strncpy(response.send_data.value, "HTTP/1.1 404 Not Found\r\n\r\n",
+			(sizeof(char) * response.send_data.length));
 	}
 
-	int error = send(client_fd, response.send_data.characters, strlen(response.send_data.characters), 0);
+	int error = send(client_fd, response.send_data.value,
+		strlen(response.send_data.value), 0);
 	if (error < 0) {
 		printf("\nSocket error.");
 		exit(1);
@@ -176,6 +228,6 @@ int main() {
 	printf("Client connected\n");
 
 	close(server_fd);
-
+	Arena_Destroy(&request_response_data);
 	return 0;
 }

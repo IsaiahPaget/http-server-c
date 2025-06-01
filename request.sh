@@ -13,5 +13,5 @@ curl -v http://localhost:4221/test \
   -H "Referer: http://localhost:8080/ref" \
   -H "Content-Type: application/json" \
   -H "Authorization: Basic dXNlcjpwYXNz" \
-  -H "If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT"
-
+  -H "If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT" \
+  -d '{"key": "value"}'
