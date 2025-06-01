@@ -119,31 +119,24 @@ typedef struct Request {
 
 void parse_request(Arena* request_response_data, Request* request)
 {
-	printf("%s\n", request->request_data.value);
-
-	// get the string from the start of the line to the first occurence of \r\n
-	int32_t index_of_rn = String_IndexOf(request->request_data, "\r\n", 0);
+	int32_t index_end_of_start_line = String_IndexOf(request->request_data, "\r\n", 0);
 	request->start_line.value = Arena_Alloc(request_response_data, START_LINE_BUFFER_SIZE);
-	String_Slice(&request->start_line, request->request_data, 0, index_of_rn);
-	// get the string from after the firs;t occurence of \r\n until the first
-	// occurence of \r\n\r\n
-	int32_t index_of_rn_two = String_IndexOf(request->request_data, "\r\n\r\n", index_of_rn + 2);
-	if (index_of_rn_two == -1) {
-		printf("index not found: %i\n", index_of_rn_two);
+	String_Slice(&request->start_line, request->request_data, 0, index_end_of_start_line);
+
+	int32_t index_end_of_headers = String_IndexOf(request->request_data, "\r\n\r\n", index_end_of_start_line + 2);
+	if (index_end_of_headers == -1) {
+		printf("index not found: %i\n", index_end_of_headers);
 		raise(SIGTRAP);
 	}
 	request->headers.value = Arena_Alloc(request_response_data, HEADERS_BUFFER_SIZE);
-	String_Slice(&request->headers, request->request_data, index_of_rn + 2,
-		index_of_rn_two);
+	String_Slice(&request->headers, request->request_data, index_end_of_start_line + 2,
+		index_end_of_headers);
 
 	request->body.value = Arena_Alloc(request_response_data, BODY_BUFFER_SIZE);
-	String_Slice(&request->body, request->request_data, index_of_rn_two + 4, request->request_data.length);
-	printf("start_line: %s\n", request->start_line.value);
-	printf("headers: %s\n", request->headers.value);
-	printf("body: %s\n", request->body.value);
-	//
-	// get the string from after the first occurence of \r\n\r\n until the end
-	// of the string
+	String_Slice(&request->body, request->request_data, index_end_of_headers + 4, request->request_data.length);
+	/* printf("start_line: %s\n", request->start_line.value); */
+	/* printf("headers: %s\n", request->headers.value); */
+	/* printf("body: %s\n", request->body.value); */
 }
 
 int main()
