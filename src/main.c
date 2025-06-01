@@ -132,11 +132,15 @@ void parse_request(Arena* request_response_data, Request* request)
 		printf("index not found: %i\n", index_of_rn_two);
 		raise(SIGTRAP);
 	}
-	request->headers.value = Arena_Alloc(request_response_data, START_LINE_BUFFER_SIZE);
+	request->headers.value = Arena_Alloc(request_response_data, HEADERS_BUFFER_SIZE);
 	String_Slice(&request->headers, request->request_data, index_of_rn + 2,
 		index_of_rn_two);
+
+	request->body.value = Arena_Alloc(request_response_data, BODY_BUFFER_SIZE);
+	String_Slice(&request->body, request->request_data, index_of_rn_two + 4, request->request_data.length);
 	printf("start_line: %s\n", request->start_line.value);
 	printf("headers: %s\n", request->headers.value);
+	printf("body: %s\n", request->body.value);
 	//
 	// get the string from after the first occurence of \r\n\r\n until the end
 	// of the string
